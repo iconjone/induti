@@ -1,0 +1,50 @@
+[
+    {
+        "time": [
+            14921,
+            17334
+        ],
+        "temperature": 123.95,
+        "coolDownTemperature": 115.87
+    },
+    {
+        "time": [
+            9609,
+            11495
+        ],
+        "temperature": 141.32,
+        "coolDownTemperature": 137.88
+    },
+    {
+        "time": [
+            10915,
+            12800
+        ],
+        "temperature": 162,
+        "coolDownTemperature": 156.85
+    },
+    {
+        "time": [
+            15490,
+            18510
+        ],
+        "temperature": 136.33,
+        "coolDownTemperature": 133.58
+    },
+    {
+        "time": [
+            10427,
+            12852
+        ],
+        "temperature": 145.8,
+        "coolDownTemperature": 143.88
+    },
+    {
+        "time": [
+            9943,
+            12660
+        ],
+        "temperature": 154.823,
+        "coolDownTemperature": 152.105
+    }
+]

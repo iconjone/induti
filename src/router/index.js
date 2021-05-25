@@ -1,14 +1,14 @@
 import Vue from "vue";
 import VueRouter from "vue-router";
-import Home from "../views/Home.vue";
+import HelloWorld from "../components/HelloWorld.vue";
 
 Vue.use(VueRouter);
 
 const routes = [
   {
     path: "/",
-    name: "Home",
-    component: Home,
+    name: "HelloWorld",
+    component: HelloWorld,
   },
   {
     path: "/about",
@@ -21,9 +21,9 @@ const routes = [
     },
   },
 ];
-
+console.log(process.env.IS_ELECTRON);
 const router = new VueRouter({
-  mode: "history",
+  mode: process.env.IS_ELECTRON ? "hash" : "history",
   base: process.env.BASE_URL,
   routes,
 });
