@@ -110,27 +110,55 @@
     </v-dialog>
 
     <v-main>
-      <v-container>
+      <v-container fluid>
         <v-row class="text-center">
-          <v-col cols="12">
-            <v-img
-              :src="require('./assets/induti_logo.png')"
-              class="my-3"
-              contain
-              height="200"
-            />
-          </v-col>
+          
+          <v-tabs vertical color="error" :value="verticalTab" >
+            <v-tab>
+              <v-icon left> mdi-controller-classic </v-icon>
+              Custom Control
+            </v-tab>
+            <v-tab>
+              <v-icon left> mdi-cannabis </v-icon>
+              Compounds & Terpenes
+            </v-tab>
+            <v-tab>
+              <v-icon left> mdi-access-point </v-icon>
+              Option 3
+            </v-tab>
 
-          <v-col class="mb-4">
-            <h1 class="display-2 font-weight-bold mb-3">
-              Welcome to Induti{{ boardConnection }}
-            </h1>
+            <v-tab-item>
+              <v-card flat>
+                <CustomControl v-bind:ih="ih" v-bind:led="led" v-bind:isInserted="isInserted"></CustomControl>
+              </v-card>
+            </v-tab-item>
+            <v-tab-item>
+              <v-card flat>
+             OK
+              </v-card>
+            </v-tab-item>
+            <v-tab-item>
+              <v-card flat>
+                <v-card-text>
+                  <p>
+                    Fusce a quam. Phasellus nec sem in justo pellentesque
+                    facilisis. Nam eget dui. Proin viverra, ligula sit amet
+                    ultrices semper, ligula arcu tristique sapien, a accumsan
+                    nisi mauris ac eros. In dui magna, posuere eget, vestibulum
+                    et, tempor auctor, justo.
+                  </p>
 
-            <p class="subheading font-weight-regular">
-              Let's find your Induction Heater
-            </p>
-            <v-btn @click="heat()"> Heat </v-btn>
-          </v-col>
+                  <p class="mb-0">
+                    Cras sagittis. Phasellus nec sem in justo pellentesque
+                    facilisis. Proin sapien ipsum, porta a, auctor quis, euismod
+                    ut, mi. Donec quam felis, ultricies nec, pellentesque eu,
+                    pretium quis, sem. Nam at tortor in tellus interdum
+                    sagittis.
+                  </p>
+                </v-card-text>
+              </v-card>
+            </v-tab-item>
+          </v-tabs>
         </v-row>
       </v-container>
       <router-view />
@@ -148,13 +176,15 @@ const network = require("./network");
 const debounce = require("lodash/debounce");
 
 import MeasureCalibration from "./components/MeasureCalibration.vue";
+import CustomControl from "./components/CustomControl.vue";
 export default {
   name: "App",
-  components: { MeasureCalibration },
+  components: { MeasureCalibration, CustomControl },
 
   data: () => ({
     update: 0,
     board: null,
+    renderComponent: true,
     electronStore: null,
     connectionIcon: "mdi-access-point-network-off",
     EPC_status: closed,
@@ -166,6 +196,7 @@ export default {
     therm: null,
     ih: null,
     isInserted: false,
+    verticalTab: 1,
     calibrationDialog: false,
     calibrationStepper: 1,
     calibrationInfo: { therm: [120, 148, 162] },
@@ -362,6 +393,8 @@ export default {
           this.hostAddress = arr[0].ip;
           console.log("should only run after");
           this.startConnection();
+          this.renderComponent = false;
+          this.renderComponent = true;
         }
       });
     },
@@ -396,51 +429,50 @@ export default {
       });
     },
     convertRawTempToReal: function (raw) {
-      if(Object.keys(this.temperatureLUT).length != 0){
-      if (raw < this.temperatureLUT["70"]) return 70;
-      else if (this.temperatureLUT["70"] <= raw < this.temperatureLUT["90"])
-        return this.calculatePoint(
-          this.temperatureLUT["70"],
-          70,
-          this.temperatureLUT["90"],
-          90,
-          raw
-        );
-      else if (this.temperatureLUT["90"] <= raw < this.temperatureLUT["250"])
-        return this.calculatePoint(
-          this.temperatureLUT["90"],
-          90,
-          this.temperatureLUT["250"],
-          250,
-          raw
-        );
-      else if (this.temperatureLUT["250"] <= raw < this.temperatureLUT["400"])
-        return this.calculatePoint(
-          this.temperatureLUT["250"],
-          250,
-          this.temperatureLUT["400"],
-          400,
-          raw
-        );
-      else if (this.temperatureLUT["400"] <= raw < this.temperatureLUT["430"])
-        return this.calculatePoint(
-          this.temperatureLUT["400"],
-          400,
-          this.temperatureLUT["430"],
-          430,
-          raw
-        );
-      else
-        return this.calculatePoint(
-          this.temperatureLUT["430"],
-          430,
-          this.temperatureLUT["450"],
-          450,
-          raw
-        );
-      }
-      else{
-        return 70
+      if (Object.keys(this.temperatureLUT).length != 0) {
+        if (raw < this.temperatureLUT["70"]) return 70;
+        else if (this.temperatureLUT["70"] <= raw < this.temperatureLUT["90"])
+          return this.calculatePoint(
+            this.temperatureLUT["70"],
+            70,
+            this.temperatureLUT["90"],
+            90,
+            raw
+          );
+        else if (this.temperatureLUT["90"] <= raw < this.temperatureLUT["250"])
+          return this.calculatePoint(
+            this.temperatureLUT["90"],
+            90,
+            this.temperatureLUT["250"],
+            250,
+            raw
+          );
+        else if (this.temperatureLUT["250"] <= raw < this.temperatureLUT["400"])
+          return this.calculatePoint(
+            this.temperatureLUT["250"],
+            250,
+            this.temperatureLUT["400"],
+            400,
+            raw
+          );
+        else if (this.temperatureLUT["400"] <= raw < this.temperatureLUT["430"])
+          return this.calculatePoint(
+            this.temperatureLUT["400"],
+            400,
+            this.temperatureLUT["430"],
+            430,
+            raw
+          );
+        else
+          return this.calculatePoint(
+            this.temperatureLUT["430"],
+            430,
+            this.temperatureLUT["450"],
+            450,
+            raw
+          );
+      } else {
+        return 70;
       }
     },
     calculatePoint: function (x1, y1, x2, y2, raw) {
@@ -459,11 +491,15 @@ export default {
         this.calibrationStepper = this.calibrationStepper + 1;
       else {
         this.calibrationDialog = false;
+        this.electronStore.set(
+          "calibrationData",
+          this.calibrationDataCollection
+        );
+        this.calibrationData = this.calibrationDataCollection;
         this.initiateCustomMeasurements();
       }
     },
     initiateCustomMeasurements: function () {
-      console.log(this.calibrationDataCollection);
       this.temperatureLUT = {
         450:
           Math.max(
@@ -484,7 +520,7 @@ export default {
           (this.calibrationData[0].temperature +
             this.calibrationData[3].coolDownTemperature) /
           2,
-          90: this.calibrationData[0].temperature,
+        90: this.calibrationData[0].temperature,
         70: this.calibrationData[0].coolDownTemperature,
       };
     },
@@ -508,6 +544,9 @@ export default {
     if (this.electronStore.get("calibrationData") != undefined) {
       this.calibrationData = this.electronStore.get("calibrationData");
     }
+    if(this.electronStore.get("verticalTab") != undefined){
+      this.verticalTab = this.electronStore.get("verticalTab")
+    }
 
     this.initiateCustomMeasurements();
 
@@ -527,6 +566,11 @@ export default {
     //   console.log('running')
 
     // }
+  },
+  watch:{
+    verticalTab:function(val){
+      this.electronStore.set("verticalTab", val)
+    }
   },
 };
 </script>
