@@ -3,143 +3,139 @@
 #include <ESPAsyncWebServer.h>
 #include <ArduinoJson.h>
 
-#include "config_html.h"
-
+#include "html.h"
 
 IPAddress apIP(192, 168, 4, 1);
 IPAddress netMsk(255, 255, 255, 0);
 DNSServer dnsServer;
 AsyncWebServer httpServer(80);
 String wifiList = "";
-bool configMode = false;
+bool bootUp = false;
+bool restartCountdown = false;
+unsigned long checkMillis = 0;
 
 int LED = 16;
 int IH = 5;
+int SWITCH = 4;
+int RED_LED = 14;
+int GREEN_LED = 12;
+int BLUE_LED = 13;
 
-//###Setup Access Point###
-void setupAccessPoint() {
-setUpVariables();
+//###Setup Config Portal###
+bool configMode = false;
+void setupConfigPortal()
+{
+  lightControl(0xbd5200);
+  setUpVariables();
   static char szSSID[12];
   sprintf(szSSID, "Induti %02d", ESP.getChipId() % 100);
 
   // Set WiFi to station mode and disconnect from an AP if it was previously connected
   //WIFI.wifi_sta_config_t config = {0};
+  if ((WiFi.getMode() & WIFI_STA) != 0)
+  {
+    ETS_UART_INTR_DISABLE(); // @todo probably not needed
+    wifi_station_disconnect();
+    ETS_UART_INTR_ENABLE();
+
+  } // disconnect before begin, in case anything is hung, this causes a 2 seconds delay for connect
   WiFi.mode(WIFI_STA);
+
   WiFi.disconnect();
+
+  Serial.println(WiFi.getMode());
   delay(100);
   // Make sure the requested SSID is not being used
   bool exists = true;
-  while(exists) {
+  while (exists)
+  {
     int n = WiFi.scanNetworks();
+    Serial.print("Scanning Wifi Networks: ");
+    Serial.println(n);
     exists = false;
-    for (int i=0; i<n; i++) {
+    for (int i = 0; i < n; i++)
+    {
       String ssid = WiFi.SSID(i);
       Serial.print("Found SSID ");
       Serial.println(ssid);
       wifiList += ssid;
       wifiList += "|"; //delimter
 
-      if(strcmp(szSSID, ssid.c_str())==0)
+      if (strcmp(szSSID, ssid.c_str()) == 0)
         exists = true;
-      }
-    if(exists) {
-      delay(5000); // Wait before scanning again
-      }
     }
-
+    if (exists || n == -1 || n == 0)
+    {
+      delay(5000); // Wait before scanning again
+      exists = true;
+    }
+  }
+  //might need to wifi.disconnect
   // Set up the open AP with the given SSID
   WiFi.mode(WIFI_AP);
   WiFi.softAPConfig(apIP, apIP, netMsk);
   WiFi.softAP(szSSID);
   delay(100);
+  blinkLight(0xbd5200);
   setupDNS();
-  setupWebServer(true);
-  }
-void setUpVariables(){
-IPAddress apIP(192, 168, 4, 1);
-IPAddress netMsk(255, 255, 255, 0);
-DNSServer dnsServer;
-AsyncWebServer httpServer(80);
-
+  setupWebServer();
 }
-void setupDNS() {
+void setUpVariables()
+{
+  IPAddress apIP(192, 168, 4, 1);
+  IPAddress netMsk(255, 255, 255, 0);
+  DNSServer dnsServer;
+  AsyncWebServer httpServer(80);
+}
+void setupDNS()
+{
   /* Setup the DNS server redirecting all the domains to the apIP */
   dnsServer.setErrorReplyCode(DNSReplyCode::NoError);
   dnsServer.start(53, "*", apIP);
-  
-  }
+  configMode = true;
+}
 
 //## Access Point Server ##
-PGM_P s = config_html_str;
-void setupWebServer(bool withForm) {
-Serial.println("Lets see if run");
-  //httpServer.on("/config", handleConfig);
-    httpServer.on("/config", HTTP_GET, [](AsyncWebServerRequest * request) {
-      Serial.println("oooh");
-      request -> send_P(200, "text/html", s); //_p or send
-    });
-        httpServer.on("/config", HTTP_POST, [](AsyncWebServerRequest * request) {
-      Serial.println("oooh i GOT IT yuh");
-     String _ssid = request->arg("ssid").c_str();
-     String _password = request->arg("password").c_str();
-    Serial.println(_ssid + " | " + _password);
-     request -> send(200, "text/plain", "WOW GOOD JOB"); //_p or send
-     configMode = false;
-  WiFi.softAPdisconnect();
-WiFi.disconnect();
+PGM_P config_html = config_html_str;
+void setupWebServer()
+{
+  lightControl(0x183ed6);
+  httpServer.on("/config", HTTP_GET, [](AsyncWebServerRequest *request)
+                {
+                  Serial.println("Config Page Requested");
+                  request->send_P(200, "text/html", config_html); //_p or send
+                });
+  httpServer.on("/config", HTTP_POST, [](AsyncWebServerRequest *request)
+                {
+                  Serial.println("Recieved Config Page Paramters");
+                  String _ssid = request->arg("ssid").c_str();
+                  String _password = request->arg("password").c_str();
+                  Serial.println(_ssid + " | " + _password);
+                  request->send(200, "text/plain", "Connecting to SSID"); //_p or send
+                  configMode = false;
+                  WiFi.softAPdisconnect();
+                  WiFi.disconnect();
+                  blinkLight(0x183ed6);
+                  connectWifi(_ssid, _password);
+                  Serial.println("Initiated WiFi Connection Process...");
+                });
+  httpServer.on("/wifiList", HTTP_GET, [](AsyncWebServerRequest *request)
+                {
+                  Serial.println("WifiList Requested");
+                  request->send(200, "text/plain", wifiList); //_p or send
+                });
+  httpServer.onNotFound(handleNotFound);
 
-             Serial.print("f1");
-    //  delay(5000);
-             Serial.print("f2");
-
-
-             Serial.print("f3");
-
-//     dnsServer.stop();
-             Serial.print("f4");
-
-    // delay(500);
-  //   httpServer.reset();
-             Serial.print("f5");
-     //delay(500);
-    // delay(500);
-connectWifi(_ssid,_password);
-         
-
-
-//while (WiFi.status() != WL_CONNECTED);
-      Serial.print("f10");
-  Serial.println();
-
-  Serial.print("Connected, IP address: ");
-  //Serial.println(WiFi.localIP());
-
-  //delay(120000);
-
-
-    });
-        httpServer.on("/wifiList", HTTP_GET, [](AsyncWebServerRequest * request) {
-      Serial.println("wifiList");
-      request -> send(200, "text/plain", wifiList); //_p or send
-    });
-    httpServer.onNotFound(handleNotFound);
-//   if(withForm) {
-//     httpServer.onNotFound(handleDefault);
-//     }
-//   else
-//     httpServer.onNotFound(handleNotFound);
   httpServer.begin();
-  Serial.println("Lets see if run2");
-  }
-void handleNotFound(AsyncWebServerRequest *request) {
-    //  request -> send(200, "text/html", s); //_p or send
-    AsyncWebServerResponse *response = request->beginResponse(302, "text/plain", "");
-    response->addHeader("Location", String("http://") + toStringIp(request->client()->localIP()) + String("/config"));
-    request->send(response);
-
-  }
-
-  String toStringIp(IPAddress ip)
+  Serial.println("AP Server Begun.");
+}
+void handleNotFound(AsyncWebServerRequest *request)
+{
+  AsyncWebServerResponse *response = request->beginResponse(302, "text/plain", "");
+  response->addHeader("Location", String("http://") + toStringIp(request->client()->localIP()) + String("/config"));
+  request->send(response);
+}
+String toStringIp(IPAddress ip)
 {
   String res = "";
   for (int i = 0; i < 3; i++)
@@ -151,232 +147,262 @@ void handleNotFound(AsyncWebServerRequest *request) {
 
   return res;
 }
-
-
-
-  //verify connectrivity
-
-
-
-//html to string  var string = document.documentElement.innerHTML;
-//www.nousphere.net/cleanspecial.php Cleaning up html
-//https://ajusa.github.io/lit/docs/lit.html?
-
-// typedef enum {
-//     WL_NO_SHIELD        = 255,   // for compatibility with WiFi Shield library
-//     WL_IDLE_STATUS      = 0,
-//     WL_NO_SSID_AVAIL    = 1,
-//     WL_SCAN_COMPLETED   = 2,
-//     WL_CONNECTED        = 3,
-//     WL_CONNECT_FAILED   = 4,
-//     WL_CONNECTION_LOST  = 5,
-//     WL_WRONG_PASSWORD   = 6,
-//     WL_DISCONNECTED     = 7
-// } wl_status_t;
 bool waitingWifi = false;
-bool waitForConnectResult(uint16_t timeout) {
+String WiFi_SSID(bool persistent)
+{
 
-waitingWifi = true;
-  unsigned long timeoutmillis = millis() + timeout;
-Serial.println("Waiting For connect..");
+  struct station_config conf;
+  if (persistent)
+    wifi_station_get_config_default(&conf);
+  else
+    wifi_station_get_config(&conf);
 
-  Serial.println(WiFi.status());
-  Serial.println(timeoutmillis);
-  Serial.println(millis());
-  // while(WiFi.status() != 3 || WiFi.status() != 4){
-  //   Serial.println("Still Waiting");
-  //   delayMicroseconds(1000000);
-  //   yield();
-  // }
-  // while(millis() < timeoutmillis) {
-  //    delay(1000);
-  //   // @todo detect additional states, connect happens, then dhcp then get ip, there is some delay here, make sure not to timeout if waiting on IP
-  //   // if (WiFi.status() == 3 || WiFi.status() == 4) { //3= connected and 4 = connection failed
-  //   //   //return WiFi.status();
-  //   //   return true;
-  //   // }
-  //   Serial.print(". ");
-  //     Serial.print(WiFi.status());
-  //         Serial.print(" | ");
-  //         Serial.println(WiFi.status(),BIN);
-   
-  // }
-  Serial.println("THIS IS THE STATUS");
-  Serial.println(WiFi.status());
-  //return WiFi.status();
-  return true;
+  char tmp[33]; //ssid can be up to 32chars, => plus null term
+  memcpy(tmp, conf.ssid, sizeof(conf.ssid));
+  tmp[32] = 0; //nullterm in case of 32 char ssid
+  return String(reinterpret_cast<char *>(tmp));
 }
 
-String WiFi_SSID(bool persistent) {
+String WiFi_psk(bool persistent)
+{
 
-    struct station_config conf;
-    if(persistent) wifi_station_get_config_default(&conf);
-    else wifi_station_get_config(&conf);
+  struct station_config conf;
 
-    char tmp[33]; //ssid can be up to 32chars, => plus null term
-    memcpy(tmp, conf.ssid, sizeof(conf.ssid));
-    tmp[32] = 0; //nullterm in case of 32 char ssid
-    return String(reinterpret_cast<char*>(tmp));
+  if (persistent)
+    wifi_station_get_config_default(&conf);
+  else
+    wifi_station_get_config(&conf);
 
+  char tmp[65]; //psk is 64 bytes hex => plus null term
+  memcpy(tmp, conf.password, sizeof(conf.password));
+  tmp[64] = 0; //null term in case of 64 byte psk
+  return String(reinterpret_cast<char *>(tmp));
 }
 
-bool connectWifi(String ssid, String pass) {
+bool connectWifi(String ssid, String pass)
+{
+  blinkLight(0xbd5200);
+
   Serial.println("Attempting Connection");
-  uint8_t connRes = (uint8_t)WL_NO_SSID_AVAIL;
+  if ((WiFi.getMode() & WIFI_STA) != 0)
+  {
+    ETS_UART_INTR_DISABLE(); // @todo probably not needed
+    wifi_station_disconnect();
+    ETS_UART_INTR_ENABLE();
 
-
-  
-  // make sure sta is on before `begin` so it does not call enablesta->mode while persistent is ON ( which would save WM AP state to eeprom !)
-  Serial.println(connRes);
-  Serial.print("should be fine");
-  WiFi.persistent(false);
-      if((WiFi.getMode() & WIFI_STA) != 0) {
-Serial.print("fail here?");
-          ETS_UART_INTR_DISABLE(); // @todo probably not needed
-          wifi_station_disconnect();
-          ETS_UART_INTR_ENABLE();        
-
-      }// disconnect before begin, in case anything is hung, this causes a 2 seconds delay for connect
+  } // disconnect before begin, in case anything is hung, this causes a 2 seconds delay for connect
   // @todo find out what status is when this is needed, can we detect it and handle it, say in between states or idle_status
 
   // if ssid argument provided connect to that
-      unsigned long _saveTimeout   = 1200000; 
-  if (ssid != "") {
+  if (ssid != "")
+  {
 
+    WiFiMode_t newMode;
+    WiFiMode_t currentMode = WiFi.getMode();
+    newMode = (WiFiMode_t)(currentMode | WIFI_STA);
 
-WiFiMode_t newMode;
-      WiFiMode_t currentMode = WiFi.getMode();
-newMode     = (WiFiMode_t)(currentMode | WIFI_STA);
+    ETS_UART_INTR_DISABLE();
+    wifi_set_opmode(newMode);
 
-      ETS_UART_INTR_DISABLE();
- wifi_set_opmode(newMode);
+    ETS_UART_INTR_ENABLE();
 
-      ETS_UART_INTR_ENABLE();
-
-  WiFi.persistent(true);
-       WiFi.hostname("Induti");
-  WiFi.begin(ssid.c_str(), pass.c_str());
-  WiFi.persistent(false);
-Serial.println("connecting?");
-
-     connRes = waitForConnectResult(_saveTimeout); // use default save timeout for saves to prevent bugs in esp->waitforconnectresult loop
-  
+    WiFi.persistent(true);
+    WiFi.hostname("Induti");
+    WiFi.begin(ssid.c_str(), pass.c_str());
+    waitingWifi = true;
   }
-  else {
+  else
+  {
     // connect using saved ssid if there is one
-    if (WiFi_SSID(true) != "") {
+    if (WiFi_SSID(true) != "")
+    {
 
-WiFiMode_t newMode;
+      WiFiMode_t newMode;
       WiFiMode_t currentMode = WiFi.getMode();
-newMode     = (WiFiMode_t)(currentMode | WIFI_STA);
+      newMode = (WiFiMode_t)(currentMode | WIFI_STA);
 
       ETS_UART_INTR_DISABLE();
- wifi_set_opmode(newMode);
+      wifi_set_opmode(newMode);
 
       ETS_UART_INTR_ENABLE();
-           WiFi.hostname("Induti");
-WiFi.begin();
-      connRes = waitForConnectResult(_saveTimeout);
+      WiFi.hostname("Induti");
+      WiFi.begin();
+      waitingWifi = true;
     }
-
   }
 
-Serial.println("Does this get here?");
-//  DEBUG_WM(DEBUG_VERBOSE,F("Connection result:"),getWLStatusString(connRes));
-
-// WPS enabled? https://github.com/esp8266/Arduino/pull/4889
-
-
-  if(connRes != WL_SCAN_COMPLETED){
-        if(wifi_station_get_connect_status() == STATION_WRONG_PASSWORD){
-         Serial.println('Messed up the password BOZO');
-        }
-  }
-
-  return connRes;
+  return true;
 }
 
-
-
-void setup(){
-      Serial.begin(115200);
-  while (!Serial);
-  delay(200);
-  Serial.setDebugOutput(true);
-  WiFi.persistent(true);
-  Serial.println();
-  configMode = false;
-   setupAccessPoint();
-  // WiFi.mode(WIFI_AP);
-  // WiFi.begin("TheWall", "137udnC025");
-
-  // Serial.print("Connecting");
-  // while (WiFi.status() != WL_CONNECTED)
-  // {
-  //   delay(500);
-  //   Serial.print(".");
-  // }
-  // Serial.println();
-
-  // Serial.print("Connected, IP address: ");
-  // Serial.println(WiFi.localIP());
-}
-
-void notFound(AsyncWebServerRequest * request) {
-  request -> send(404, "text/plain", "Not found");
+void notFound(AsyncWebServerRequest *request)
+{
+  request->send(404, "text/plain", "Not found");
 }
 
 bool setUp = false;
-void setUpInductionHeater(){
-    if (WiFi.status() == WL_CONNECTED) {
+PGM_P control_html = control_html_str;
+void setUpInductionHeater()
+{
+  if (WiFi.status() == WL_CONNECTED)
+  {
     Serial.print(F("Connected. Local IP: "));
     Serial.println(WiFi.localIP());
-    Serial.println("Connect");
-    httpServer.on("/", HTTP_GET, [](AsyncWebServerRequest * request) {
-      digitalWrite(LED, LOW); // turn the LED on
-      Serial.println("oooh");
-      request -> send(200, "text/plain", "Hello, world");
-    });
-    httpServer.on("/on", HTTP_GET, [](AsyncWebServerRequest * request) {
-      digitalWrite(LED, LOW); // turn the LED on
-      digitalWrite(IH, HIGH); // turn the IH on
-      Serial.println("ih on");
-      request -> send(200, "text/plain", "Turning On the IH");
-    });
-    httpServer.on("/off", HTTP_GET, [](AsyncWebServerRequest * request) {
-      digitalWrite(LED, HIGH); // turn the LED off
-      digitalWrite(IH, LOW); // turn the IH off
-      Serial.println("ih off");
-      request -> send(200, "text/plain", "Turning Off the IH");
-    });
+    httpServer.on("/", HTTP_GET, [](AsyncWebServerRequest *request)
+                  {
+                    digitalWrite(LED, LOW); // turn the LED on
+                    Serial.println("Index");
+                    request->send_P(200, "text/html", control_html);
+                  });
+    httpServer.on("/on", HTTP_GET, [](AsyncWebServerRequest *request)
+                  {
+                    digitalWrite(LED, LOW); // turn the LED on
+                    analogWrite(IH, 512);   // turn the IH on
+                    Serial.println("IH ON");
+                    request->send(200, "text/plain", "Turning On the IH");
+                  });
+    httpServer.on("/off", HTTP_GET, [](AsyncWebServerRequest *request)
+                  {
+                    digitalWrite(LED, HIGH); // turn the LED off
+                    digitalWrite(IH, LOW);   // turn the IH off
+                    Serial.println("IH OFF");
+                    request->send(200, "text/plain", "Turning Off the IH");
+                  });
 
+    httpServer.on("/resetWifi", HTTP_GET, [](AsyncWebServerRequest *request)
+                  {
+                    digitalWrite(LED, HIGH); // turn the LED off
+                    digitalWrite(IH, LOW);   // turn the IH off
+                    Serial.println("Reset Wifi");
+                    request->send(200, "text/plain", "Resetting Wifi");
+                    delay(500);
+                    WiFi.disconnect();
+                    ESP.restart();
+                  });
 
     httpServer.onNotFound(notFound);
 
     httpServer.begin();
+
     setUp = true;
-}
-delay(3000);
+  }
+  delay(3000);
 }
 
-void loop(){
-    //if it's config mode
-if(configMode){
-dnsServer.processNextRequest();
-}
-if(!configMode && waitingWifi){
-  if(WiFi.status() == 7){
+bool handleWaitingConnection()
+{
+  if (WiFi.status() == 7) // == 7
+  {
     Serial.println("Still Waiting");
-    delayMicroseconds(1000000);
+    delay(1000);
+    //   wifiConnectionAttempts++;
   }
-  else{
-    Serial.println("nice it's connected");
-      delayMicroseconds(1000000);
-      waitingWifi = false;
-      
+  else
+  {
+    waitingWifi = false;
+    Serial.println(WiFi.status());
+    if (WiFi.status() == 3)
+    {
+      Serial.println("Done Conecting");
+      blinkLight(0x00FF00);
+    }
+    else
+    {
+      Serial.println("Something messed up");
+      if (!bootUp)
+      {
+        blinkLight(0xFF0000);
+        setupConfigPortal();
+      }
+      else
+      {
+        blinkLight(0xFF0000);
+        delay(500);
+        lightControl(0xFF0000);
+        checkMillis = millis();
+        restartCountdown = true;
+
+      }
+    }
+    delay(1000);
+  }
+  return true;
+}
+
+//Hex Value & brightness
+void lightControl(int hex)
+{
+  analogWrite(RED_LED, (hex >> 16) & 0xFF);
+  analogWrite(GREEN_LED, (hex >> 8) & 0xFF);
+  analogWrite(BLUE_LED, hex & 0xFF);
+}
+
+void blinkLight(int hex)
+{
+  lightControl(hex);
+  delay(500);
+  lightControl(0x000000);
+  delay(500);
+  lightControl(hex);
+  delay(500);
+  lightControl(0x000000);
+  delay(500);
+}
+void setup()
+{
+  Serial.begin(115200);
+  while (!Serial)
+    ;
+  delay(200);
+  pinMode(LED, OUTPUT);
+  pinMode(IH, OUTPUT); //IH
+  pinMode(SWITCH, INPUT_PULLUP);
+  pinMode(RED_LED, OUTPUT);
+  pinMode(GREEN_LED, OUTPUT);
+  pinMode(BLUE_LED, OUTPUT);
+
+  lightControl(0xbd5200);
+  //Serial.setDebugOutput(true);
+  Serial.println();
+  configMode = false;
+  Serial.println(WiFi_SSID(true));
+  Serial.println(WiFi_psk(true));
+  if (WiFi_SSID(true) != "")
+  {
+    Serial.println("Connecting from Saved WiFi");
+    bootUp = true;
+    connectWifi(WiFi_SSID(true), WiFi_psk(true));
+  }
+  else
+  {
+    Serial.println("Starting Config Portal");
+    setupConfigPortal();
   }
 }
-if(!setUp && !configMode && !waitingWifi){
-  setUpInductionHeater();
-}
+void loop()
+{
+  //if it's config mode
+  if (configMode)
+  {
+    dnsServer.processNextRequest();
+  }
+  if (!configMode && waitingWifi)
+  {
+    handleWaitingConnection();
+  }
+  if (!setUp && !configMode && !waitingWifi)
+  {
+    setUpInductionHeater();
+  }
+  if (digitalRead(SWITCH) == 1)
+  {
+    Serial.println("Config Mode Requested");
+  }
+  if (restartCountdown)
+  {
+    if (millis() - checkMillis >= 3 * 60 * 1000UL)
+    {
+      //WiFi.disconnect(); // Don't want to disconnect bc it will delete wifi information
+      ESP.restart();
+    }
+  }
 }
