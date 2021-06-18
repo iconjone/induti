@@ -2,6 +2,7 @@
 #include <DNSServer.h>
 #include <ESPAsyncWebServer.h>
 #include <ArduinoJson.h>
+#include <OneButton.h>
 
 #include "html.h"
 
@@ -16,10 +17,57 @@ unsigned long checkMillis = 0;
 
 int LED = 16;
 int IH = 5;
-int SWITCH = 4;
+int BUTTON = 4;
 int RED_LED = 14;
 int GREEN_LED = 12;
 int BLUE_LED = 13;
+
+//###Button stuff###
+OneButton btn = OneButton(
+    BUTTON, // Input pin for the button
+    true,   // Button is active LOW
+    true    // Enable internal pull-up resistor
+);
+unsigned long pressStartTime;
+ICACHE_RAM_ATTR void checkTicks()
+{
+  // include all buttons here to be checked
+  btn.tick(); // just call tick() to check the state.
+}
+// this function will be called when the button was pressed 1 time only.
+void singleClick()
+{
+  Serial.println("singleClick() detected.");
+} // singleClick
+
+// this function will be called when the button was pressed 2 times in a short timeframe.
+void doubleClick()
+{
+  Serial.println("doubleClick() detected.");
+} // doubleClick
+
+// this function will be called when the button was pressed multiple times in a short timeframe.
+void multiClick()
+{
+  Serial.print("multiClick(");
+  Serial.print(btn.getNumberClicks());
+  Serial.println(") detected.");
+} // multiClick
+
+// this function will be called when the button was held down for 1 second or more.
+void pressStart()
+{
+  Serial.println("pressStart()");
+  pressStartTime = millis() - 1000; // as set in setPressTicks()
+} // pressStart()
+
+// this function will be called when the button was released after a long hold.
+void pressStop()
+{
+  Serial.print("pressStop(");
+  Serial.print(millis() - pressStartTime);
+  Serial.println(") detected.");
+} // pressStop()
 
 //###Setup Config Portal###
 bool configMode = false;
@@ -320,7 +368,6 @@ bool handleWaitingConnection()
         lightControl(0xFF0000);
         checkMillis = millis();
         restartCountdown = true;
-
       }
     }
     delay(1000);
@@ -355,10 +402,18 @@ void setup()
   delay(200);
   pinMode(LED, OUTPUT);
   pinMode(IH, OUTPUT); //IH
-  pinMode(SWITCH, INPUT_PULLUP);
+
   pinMode(RED_LED, OUTPUT);
   pinMode(GREEN_LED, OUTPUT);
   pinMode(BLUE_LED, OUTPUT);
+
+  attachInterrupt(digitalPinToInterrupt(BUTTON), checkTicks, CHANGE);
+  btn.attachClick(singleClick);
+  btn.attachDoubleClick(doubleClick);
+  btn.attachMultiClick(multiClick);
+  btn.setPressTicks(1000); // that is the time when LongPressStart is called
+  btn.attachLongPressStart(pressStart);
+  btn.attachLongPressStop(pressStop);
 
   lightControl(0xbd5200);
   //Serial.setDebugOutput(true);
@@ -380,6 +435,8 @@ void setup()
 }
 void loop()
 {
+  btn.tick();
+
   //if it's config mode
   if (configMode)
   {
@@ -393,10 +450,7 @@ void loop()
   {
     setUpInductionHeater();
   }
-  if (digitalRead(SWITCH) == 1)
-  {
-    Serial.println("Config Mode Requested");
-  }
+
   if (restartCountdown)
   {
     if (millis() - checkMillis >= 3 * 60 * 1000UL)

@@ -45,6 +45,7 @@
                 "C:\\Users\\joshu\\OneDrive\\Documents\\Arduino\\libraries\\ESPAsyncTCP\\src",
                 "C:\\Users\\joshu\\AppData\\Local\\Arduino15\\packages\\esp8266\\hardware\\esp8266\\3.0.0\\libraries\\Hash\\src",
                 "C:\\Users\\joshu\\OneDrive\\Documents\\Arduino\\libraries\\ArduinoJson\\src",
+                "C:\\Users\\joshu\\OneDrive\\Documents\\Arduino\\libraries\\OneButton\\src",
                 "c:\\users\\joshu\\appdata\\local\\arduino15\\packages\\esp8266\\tools\\xtensa-lx106-elf-gcc\\3.0.0-newlib4.0.0-gnu23-48f7b08\\xtensa-lx106-elf\\include\\c++\\10.2.0",
                 "c:\\users\\joshu\\appdata\\local\\arduino15\\packages\\esp8266\\tools\\xtensa-lx106-elf-gcc\\3.0.0-newlib4.0.0-gnu23-48f7b08\\xtensa-lx106-elf\\include\\c++\\10.2.0\\xtensa-lx106-elf",
                 "c:\\users\\joshu\\appdata\\local\\arduino15\\packages\\esp8266\\tools\\xtensa-lx106-elf-gcc\\3.0.0-newlib4.0.0-gnu23-48f7b08\\xtensa-lx106-elf\\include\\c++\\10.2.0\\backward",
