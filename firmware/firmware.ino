@@ -1,4 +1,5 @@
 #include <ESP8266WiFi.h>
+#include <Arduino.h>
 #include <DNSServer.h>
 #include <ESPAsyncWebServer.h>
 #include <ArduinoJson.h>
@@ -10,8 +11,14 @@ IPAddress apIP(192, 168, 4, 1);
 IPAddress netMsk(255, 255, 255, 0);
 DNSServer dnsServer;
 AsyncWebServer httpServer(80);
+
+String _ssid = "";
+String _password = "";
+
 String wifiList = "";
 bool bootUp = false;
+bool waitingWifi = false;
+
 bool restartCountdown = false;
 unsigned long checkMillis = 0;
 
@@ -44,6 +51,12 @@ void singleClick()
 void doubleClick()
 {
   Serial.println("doubleClick() detected.");
+  WiFi.mode(WIFI_AP_STA);
+  delay(100);
+  //setUpVariables();
+  WiFi.softAPConfig(apIP, apIP, netMsk);
+  WiFi.softAP("Induti");
+  delay(100);
 } // doubleClick
 
 // this function will be called when the button was pressed multiple times in a short timeframe.
@@ -52,6 +65,13 @@ void multiClick()
   Serial.print("multiClick(");
   Serial.print(btn.getNumberClicks());
   Serial.println(") detected.");
+  if (btn.getNumberClicks() == 3)
+  {
+    WiFi.disconnect(true);
+    WiFi.persistent(false);
+    WiFi.setAutoReconnect(false);
+    ESP.restart();
+  }
 } // multiClick
 
 // this function will be called when the button was held down for 1 second or more.
@@ -59,6 +79,7 @@ void pressStart()
 {
   Serial.println("pressStart()");
   pressStartTime = millis() - 1000; // as set in setPressTicks()
+  analogWrite(IH, 512);             // turn the IH on
 } // pressStart()
 
 // this function will be called when the button was released after a long hold.
@@ -67,13 +88,14 @@ void pressStop()
   Serial.print("pressStop(");
   Serial.print(millis() - pressStartTime);
   Serial.println(") detected.");
+  analogWrite(IH, LOW); // turn the IH off
 } // pressStop()
 
 //###Setup Config Portal###
 bool configMode = false;
 void setupConfigPortal()
 {
-  lightControl(0xbd5200);
+
   setUpVariables();
   static char szSSID[12];
   sprintf(szSSID, "Induti %02d", ESP.getChipId() % 100);
@@ -124,7 +146,6 @@ void setupConfigPortal()
   WiFi.softAPConfig(apIP, apIP, netMsk);
   WiFi.softAP(szSSID);
   delay(100);
-  blinkLight(0xbd5200);
   setupDNS();
   setupWebServer();
 }
@@ -147,7 +168,7 @@ void setupDNS()
 PGM_P config_html = config_html_str;
 void setupWebServer()
 {
-  lightControl(0x183ed6);
+
   httpServer.on("/config", HTTP_GET, [](AsyncWebServerRequest *request)
                 {
                   Serial.println("Config Page Requested");
@@ -156,14 +177,13 @@ void setupWebServer()
   httpServer.on("/config", HTTP_POST, [](AsyncWebServerRequest *request)
                 {
                   Serial.println("Recieved Config Page Paramters");
-                  String _ssid = request->arg("ssid").c_str();
-                  String _password = request->arg("password").c_str();
+                  _ssid = request->arg("ssid").c_str();
+                  _password = request->arg("password").c_str();
                   Serial.println(_ssid + " | " + _password);
                   request->send(200, "text/plain", "Connecting to SSID"); //_p or send
                   configMode = false;
                   WiFi.softAPdisconnect();
                   WiFi.disconnect();
-                  blinkLight(0x183ed6);
                   connectWifi(_ssid, _password);
                   Serial.println("Initiated WiFi Connection Process...");
                 });
@@ -195,7 +215,6 @@ String toStringIp(IPAddress ip)
 
   return res;
 }
-bool waitingWifi = false;
 String WiFi_SSID(bool persistent)
 {
 
@@ -229,7 +248,6 @@ String WiFi_psk(bool persistent)
 
 bool connectWifi(String ssid, String pass)
 {
-  blinkLight(0xbd5200);
 
   Serial.println("Attempting Connection");
   if ((WiFi.getMode() & WIFI_STA) != 0)
@@ -255,7 +273,8 @@ bool connectWifi(String ssid, String pass)
     ETS_UART_INTR_ENABLE();
 
     WiFi.persistent(true);
-    WiFi.hostname("Induti");
+    WiFi.config(INADDR_ANY, INADDR_ANY, INADDR_ANY);
+    WiFi.hostname("induti");
     WiFi.begin(ssid.c_str(), pass.c_str());
     waitingWifi = true;
   }
@@ -273,7 +292,8 @@ bool connectWifi(String ssid, String pass)
       wifi_set_opmode(newMode);
 
       ETS_UART_INTR_ENABLE();
-      WiFi.hostname("Induti");
+      WiFi.config(INADDR_ANY, INADDR_ANY, INADDR_ANY);
+      WiFi.hostname("induti");
       WiFi.begin();
       waitingWifi = true;
     }
@@ -287,7 +307,7 @@ void notFound(AsyncWebServerRequest *request)
   request->send(404, "text/plain", "Not found");
 }
 
-bool setUp = false;
+bool setUpControl = false;
 PGM_P control_html = control_html_str;
 void setUpInductionHeater()
 {
@@ -295,6 +315,7 @@ void setUpInductionHeater()
   {
     Serial.print(F("Connected. Local IP: "));
     Serial.println(WiFi.localIP());
+
     httpServer.on("/", HTTP_GET, [](AsyncWebServerRequest *request)
                   {
                     digitalWrite(LED, LOW); // turn the LED on
@@ -315,7 +336,14 @@ void setUpInductionHeater()
                     Serial.println("IH OFF");
                     request->send(200, "text/plain", "Turning Off the IH");
                   });
-
+  httpServer.on("/color", HTTP_POST, [](AsyncWebServerRequest *request)
+                {
+                  String valueStr = request->arg("intValue").c_str();
+                  Serial.println(valueStr);
+                  request->send(200, "text/plain", "Changing Color"); //_p or send
+                  lightControl(valueStr.toInt());
+                  //function testColor(hex){fetch("http://192.168.1.16/color?intValue="+parseInt(hex, 16).toString(),{method:"POST"})}
+                  });
     httpServer.on("/resetWifi", HTTP_GET, [](AsyncWebServerRequest *request)
                   {
                     digitalWrite(LED, HIGH); // turn the LED off
@@ -331,17 +359,20 @@ void setUpInductionHeater()
 
     httpServer.begin();
 
-    setUp = true;
+    setUpControl = true;
   }
   delay(3000);
 }
-
+int connectionAttempt = 0;
 bool handleWaitingConnection()
 {
   if (WiFi.status() == 7) // == 7
   {
     Serial.println("Still Waiting");
-    delay(1000);
+    lightControl(0xDB4402);
+    delay(500);
+    lightControl(0x000000);
+    delay(500);
     //   wifiConnectionAttempts++;
   }
   else
@@ -351,21 +382,29 @@ bool handleWaitingConnection()
     if (WiFi.status() == 3)
     {
       Serial.println("Done Conecting");
-      blinkLight(0x00FF00);
+      connectionAttempt = 0;
+    lightControl(0x00FF00);
+
     }
     else
     {
+      connectionAttempt++;
       Serial.println("Something messed up");
+      if (WiFi.status() == 1 && connectionAttempt < 5)
+      {
+        Serial.println("Attempting Connection Again");
+        connectWifi(_ssid, _password);
+      }
       if (!bootUp)
       {
-        blinkLight(0xFF0000);
+
         setupConfigPortal();
       }
       else
       {
-        blinkLight(0xFF0000);
+
         delay(500);
-        lightControl(0xFF0000);
+
         checkMillis = millis();
         restartCountdown = true;
       }
@@ -378,9 +417,9 @@ bool handleWaitingConnection()
 //Hex Value & brightness
 void lightControl(int hex)
 {
-  analogWrite(RED_LED, (hex >> 16) & 0xFF);
-  analogWrite(GREEN_LED, (hex >> 8) & 0xFF);
-  analogWrite(BLUE_LED, hex & 0xFF);
+  analogWrite(RED_LED, (hex >> 16) );
+  analogWrite(GREEN_LED, ((hex >> 8) & 0xFF) );
+  analogWrite(BLUE_LED, (hex & 0xFF) );
 }
 
 void blinkLight(int hex)
@@ -399,6 +438,8 @@ void setup()
   Serial.begin(115200);
   while (!Serial)
     ;
+    // analogWriteRange(1023);
+    // analogWriteFreq(2500);
   delay(200);
   pinMode(LED, OUTPUT);
   pinMode(IH, OUTPUT); //IH
@@ -415,17 +456,18 @@ void setup()
   btn.attachLongPressStart(pressStart);
   btn.attachLongPressStop(pressStop);
 
-  lightControl(0xbd5200);
-  //Serial.setDebugOutput(true);
+  Serial.setDebugOutput(true);
   Serial.println();
   configMode = false;
   Serial.println(WiFi_SSID(true));
+  _ssid = WiFi_SSID(true);
   Serial.println(WiFi_psk(true));
+  _password = WiFi_psk(true);
   if (WiFi_SSID(true) != "")
   {
     Serial.println("Connecting from Saved WiFi");
     bootUp = true;
-    connectWifi(WiFi_SSID(true), WiFi_psk(true));
+    connectWifi(_ssid, _password);
   }
   else
   {
@@ -436,7 +478,7 @@ void setup()
 void loop()
 {
   btn.tick();
-
+  delay(500);
   //if it's config mode
   if (configMode)
   {
@@ -446,7 +488,7 @@ void loop()
   {
     handleWaitingConnection();
   }
-  if (!setUp && !configMode && !waitingWifi)
+  if (!setUpControl && !configMode && !waitingWifi)
   {
     setUpInductionHeater();
   }
