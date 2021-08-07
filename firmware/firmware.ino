@@ -4,6 +4,7 @@
 #include <ESPAsyncWebServer.h>
 #include <ArduinoJson.h>
 #include <OneButton.h>
+#include "Schedule.h"
 
 #include "html.h"
 
@@ -11,6 +12,7 @@ IPAddress apIP(192, 168, 4, 1);
 IPAddress netMsk(255, 255, 255, 0);
 DNSServer dnsServer;
 AsyncWebServer httpServer(80);
+AsyncWebSocket ws("/ws");
 
 String _ssid = "";
 String _password = "";
@@ -22,18 +24,104 @@ bool waitingWifi = false;
 bool restartCountdown = false;
 unsigned long checkMillis = 0;
 
-int LED = 16;
-int IH = 5;
-int BUTTON = 4;
-int RED_LED = 14;
-int GREEN_LED = 12;
-int BLUE_LED = 13;
+int LED = 2;//D4
+int IH = 13;//D7
+int BUTTON = 15; //Confirmed - Connect between D8- 3v3
+int RED_LED = 5; //Confirmed - D1
+int GREEN_LED = 4; //High @ boot - Will fail if touches ground somehow - D2
+int BLUE_LED = 0; //Will fail if touches ground somehow @ boot - D3
+int CONTACT = 14; //D5
+int TEMP_SENSOR = A0;
+bool errorState = false;
+
+WiFiEventHandler mDisconnectHandler = WiFi.onStationModeDisconnected(&onDisconnected);
+void onDisconnected(const WiFiEventStationModeDisconnected &event)
+{
+  Serial.println("Disconnected");
+  // schedule_function(errorBlink); //Maybe make an erro rblink so they know it's not connected? - There should be some indication of not connecting
+
+  if (!bootUp)
+    errorState = true;
+}
+
+WiFiEventHandler mConnectHandler = WiFi.onStationModeConnected(&onConnected);
+
+void onConnected(const WiFiEventStationModeConnected &event)
+{
+  Serial.println("Connected");
+  errorState = false;
+  schedule_function(successBlink);
+}
+
+void onWsEvent(AsyncWebSocket * server, AsyncWebSocketClient * client, AwsEventType type, void * arg, uint8_t *data, size_t len){
+ //About 160 messages can be sent before it dies
+ //Take data and put it in JSON
+  if(type == WS_EVT_CONNECT){
+ 
+    Serial.println("Websocket client connection received");
+    client->text("Hello from ESP8266 Server");
+ 
+  } else if(type == WS_EVT_DISCONNECT){
+    Serial.println("Client disconnected");
+ 
+  }else if(type == WS_EVT_DATA){
+    //data packet
+    AwsFrameInfo * info = (AwsFrameInfo*)arg;
+    if(info->final && info->index == 0 && info->len == len){
+      //the whole message is in a single frame and we got all of it's data
+      os_printf("ws[%s][%u] %s-message[%llu]: ", server->url(), client->id(), (info->opcode == WS_TEXT)?"text":"binary", info->len);
+      if(info->opcode == WS_TEXT){
+        data[len] = 0;
+        os_printf("%s\n", (char*)data);
+      } else {
+        for(size_t i=0; i < info->len; i++){
+          os_printf("%02x ", data[i]);
+        }
+        os_printf("\n");
+      }
+      if(info->opcode == WS_TEXT)
+        client->text("I got your text message");
+      else
+        client->binary("I got your binary message");
+    } else {
+      //message is comprised of multiple frames or the frame is split into multiple packets
+      if(info->index == 0){
+        if(info->num == 0)
+          os_printf("ws[%s][%u] %s-message start\n", server->url(), client->id(), (info->message_opcode == WS_TEXT)?"text":"binary");
+        os_printf("ws[%s][%u] frame[%u] start[%llu]\n", server->url(), client->id(), info->num, info->len);
+      }
+
+      os_printf("ws[%s][%u] frame[%u] %s[%llu - %llu]: ", server->url(), client->id(), info->num, (info->message_opcode == WS_TEXT)?"text":"binary", info->index, info->index + len);
+      if(info->message_opcode == WS_TEXT){
+        data[len] = 0;
+        os_printf("%s\n", (char*)data);
+      } else {
+        for(size_t i=0; i < len; i++){
+          os_printf("%02x ", data[i]);
+        }
+        os_printf("\n");
+      }
+
+      if((info->index + len) == info->len){
+        os_printf("ws[%s][%u] frame[%u] end[%llu]\n", server->url(), client->id(), info->num, info->len);
+        if(info->final){
+          os_printf("ws[%s][%u] %s-message end\n", server->url(), client->id(), (info->message_opcode == WS_TEXT)?"text":"binary");
+          if(info->message_opcode == WS_TEXT)
+            client->text("I got your text message");
+          else
+            client->binary("I got your binary message");
+        }
+      }
+    }
+  }
+  //Handle JSON stuff here
+}
 
 //###Button stuff###
 OneButton btn = OneButton(
     BUTTON, // Input pin for the button
-    true,   // Button is active LOW
-    true    // Enable internal pull-up resistor
+    false,   // Button is active LOW
+    false    // Enable internal pull-up resistor
 );
 unsigned long pressStartTime;
 ICACHE_RAM_ATTR void checkTicks()
@@ -44,7 +132,24 @@ ICACHE_RAM_ATTR void checkTicks()
 // this function will be called when the button was pressed 1 time only.
 void singleClick()
 {
+  //if error state - try recconecting to ssid <- (Might be able to just esp restart?)
   Serial.println("singleClick() detected.");
+  //for fun easy heating....
+  lightControl(0xFF00FF);
+  digitalWrite(IH, 255);
+  delay(2500);
+  digitalWrite(IH, 510);
+  delay(2500);
+  digitalWrite(IH, 765);
+  delay(2500);
+  digitalWrite(IH, 1023);
+  delay(2500);
+  lightControl(0x00FF00);
+  digitalWrite(IH, LOW);
+  delay(3000);
+  schedule_function(successBlink);
+
+  // lightControl(0xFF0000);
 } // singleClick
 
 // this function will be called when the button was pressed 2 times in a short timeframe.
@@ -79,7 +184,8 @@ void pressStart()
 {
   Serial.println("pressStart()");
   pressStartTime = millis() - 1000; // as set in setPressTicks()
-  analogWrite(IH, 512);             // turn the IH on
+  analogWrite(IH, 765);             // turn the IH on
+  errorState = true;
 } // pressStart()
 
 // this function will be called when the button was released after a long hold.
@@ -89,6 +195,8 @@ void pressStop()
   Serial.print(millis() - pressStartTime);
   Serial.println(") detected.");
   analogWrite(IH, LOW); // turn the IH off
+  errorState = false;
+
 } // pressStop()
 
 //###Setup Config Portal###
@@ -327,22 +435,28 @@ void setUpInductionHeater()
                     digitalWrite(LED, LOW); // turn the LED on
                     analogWrite(IH, 512);   // turn the IH on
                     Serial.println("IH ON");
+                    lightControl(0x00FF00);
                     request->send(200, "text/plain", "Turning On the IH");
                   });
     httpServer.on("/off", HTTP_GET, [](AsyncWebServerRequest *request)
                   {
                     digitalWrite(LED, HIGH); // turn the LED off
                     digitalWrite(IH, LOW);   // turn the IH off
+                    lightControl(0xFF0000);
                     Serial.println("IH OFF");
                     request->send(200, "text/plain", "Turning Off the IH");
                   });
-  httpServer.on("/color", HTTP_POST, [](AsyncWebServerRequest *request)
-                {
-                  String valueStr = request->arg("intValue").c_str();
-                  Serial.println(valueStr);
-                  request->send(200, "text/plain", "Changing Color"); //_p or send
-                  lightControl(valueStr.toInt());
-                  //function testColor(hex){fetch("http://192.168.1.16/color?intValue="+parseInt(hex, 16).toString(),{method:"POST"})}
+    httpServer.on("/color", HTTP_POST, [](AsyncWebServerRequest *request)
+                  {
+                    String valueStr = request->arg("intValue").c_str();
+                    Serial.println(valueStr);
+                    request->send(200, "text/plain", "Changing Color"); //_p or send
+                    lightControl(valueStr.toInt());
+                    //function testColor(hex){fetch("http://192.168.1.16/color?intValue="+parseInt(hex, 16).toString(),{method:"POST"})}
+                  });
+        httpServer.on("/induti", HTTP_GET, [](AsyncWebServerRequest *request)
+                  {
+                    request->send(200, "text/plain", "true");
                   });
     httpServer.on("/resetWifi", HTTP_GET, [](AsyncWebServerRequest *request)
                   {
@@ -356,6 +470,9 @@ void setUpInductionHeater()
                   });
 
     httpServer.onNotFound(notFound);
+    
+    ws.onEvent(onWsEvent);
+    httpServer.addHandler(&ws);
 
     httpServer.begin();
 
@@ -369,10 +486,8 @@ bool handleWaitingConnection()
   if (WiFi.status() == 7) // == 7
   {
     Serial.println("Still Waiting");
-    lightControl(0xDB4402);
-    delay(500);
-    lightControl(0x000000);
-    delay(500);
+    schedule_function(indeterminateBlink);
+
     //   wifiConnectionAttempts++;
   }
   else
@@ -383,8 +498,7 @@ bool handleWaitingConnection()
     {
       Serial.println("Done Conecting");
       connectionAttempt = 0;
-    lightControl(0x00FF00);
-
+      schedule_function(successBlink);
     }
     else
     {
@@ -397,16 +511,17 @@ bool handleWaitingConnection()
       }
       if (!bootUp)
       {
-
         setupConfigPortal();
+      //indertiminateState
       }
       else
       {
 
         delay(500);
 
-        checkMillis = millis();
-        restartCountdown = true;
+        // checkMillis = millis();
+        // restartCountdown = true;
+        errorState = true;
       }
     }
     delay(1000);
@@ -417,29 +532,41 @@ bool handleWaitingConnection()
 //Hex Value & brightness
 void lightControl(int hex)
 {
-  analogWrite(RED_LED, (hex >> 16) );
-  analogWrite(GREEN_LED, ((hex >> 8) & 0xFF) );
-  analogWrite(BLUE_LED, (hex & 0xFF) );
+  analogWrite(RED_LED, (hex >> 16));
+  analogWrite(GREEN_LED, ((hex >> 8) & 0xFF));
+  analogWrite(BLUE_LED, (hex & 0xFF));
 }
 
 void blinkLight(int hex)
 {
   lightControl(hex);
   delay(500);
-  lightControl(0x000000);
+  lightControl(0x0);
   delay(500);
   lightControl(hex);
   delay(500);
-  lightControl(0x000000);
-  delay(500);
+  lightControl(0x0);
+  //delay(500);
+}
+void errorBlink()
+{
+  blinkLight(0xFF0000);
+}
+void indeterminateBlink()
+{
+  blinkLight(0xDB4402);
+}
+void successBlink()
+{
+  blinkLight(0x00FF00);
 }
 void setup()
 {
   Serial.begin(115200);
   while (!Serial)
     ;
-    // analogWriteRange(1023);
-    // analogWriteFreq(2500);
+  // analogWriteRange(1023);
+  // analogWriteFreq(2500);
   delay(200);
   pinMode(LED, OUTPUT);
   pinMode(IH, OUTPUT); //IH
@@ -447,6 +574,8 @@ void setup()
   pinMode(RED_LED, OUTPUT);
   pinMode(GREEN_LED, OUTPUT);
   pinMode(BLUE_LED, OUTPUT);
+
+  pinMode(CONTACT, INPUT_PULLUP);
 
   attachInterrupt(digitalPinToInterrupt(BUTTON), checkTicks, CHANGE);
   btn.attachClick(singleClick);
@@ -475,10 +604,35 @@ void setup()
     setupConfigPortal();
   }
 }
+DynamicJsonDocument doc(32);
+String state = "";
 void loop()
 {
   btn.tick();
   delay(500);
+  Serial.print("Contact read: ");
+  Serial.println(digitalRead(CONTACT));
+
+  int analogValue = analogRead(TEMP_SENSOR);
+//   // Serial.print("Raw Value: ");
+//   // Serial.println(analogValue);
+float millivolts = (analogValue/1024.0) * 3300; //3300 is the voltage provided by NodeMCU
+// // Serial.print("Mv:");
+// // Serial.println(millivolts);
+float celsius = (millivolts - 50)/10;
+// // Serial.print("in DegreeC=   ");
+// // Serial.println(celsius);
+
+float fahrenheit = ((celsius * 9)/5 + 32);
+Serial.print(" in Farenheit=   ");
+Serial.println(fahrenheit);
+
+//Safety Turn off..
+if(fahrenheit > 225){ //Some kind of vertical rate climb?
+  digitalWrite(IH, 0);
+  //Mayvbe just force restart all together?
+}
+
   //if it's config mode
   if (configMode)
   {
@@ -491,6 +645,16 @@ void loop()
   if (!setUpControl && !configMode && !waitingWifi)
   {
     setUpInductionHeater();
+
+  }
+
+  if(setUpControl){// Everything is setup - Wifi is enabled
+    //Send State
+    doc["TEMP"] = fahrenheit;
+    doc["CONTACT"] = digitalRead(CONTACT);
+    
+    serializeJson(doc, state);
+    ws.textAll(state);
   }
 
   if (restartCountdown)
@@ -500,5 +664,9 @@ void loop()
       //WiFi.disconnect(); // Don't want to disconnect bc it will delete wifi information
       ESP.restart();
     }
+  }
+  if (errorState)
+  {
+    schedule_function(errorBlink);
   }
 }
