@@ -4,7 +4,8 @@
 #include <ESPAsyncWebServer.h>
 #include <ArduinoJson.h>
 #include <OneButton.h>
-#include "Schedule.h"
+#include <Schedule.h>
+
 
 #include "html.h"
 
@@ -24,13 +25,13 @@ bool waitingWifi = false;
 bool restartCountdown = false;
 unsigned long checkMillis = 0;
 
-int LED = 2;//D4
-int IH = 13;//D7
-int BUTTON = 15; //Confirmed - Connect between D8- 3v3
-int RED_LED = 5; //Confirmed - D1
+int LED = 2;       //D4
+int IH = 13;       //D7
+int BUTTON = 15;   //Confirmed - Connect between D8- 3v3
+int RED_LED = 5;   //Confirmed - D1
 int GREEN_LED = 4; //High @ boot - Will fail if touches ground somehow - D2
-int BLUE_LED = 0; //Will fail if touches ground somehow @ boot - D3
-int CONTACT = 14; //D5
+int BLUE_LED = 0;  //Will fail if touches ground somehow @ boot - D3
+int CONTACT = 14;  //D5
 int TEMP_SENSOR = A0;
 bool errorState = false;
 
@@ -53,60 +54,78 @@ void onConnected(const WiFiEventStationModeConnected &event)
   schedule_function(successBlink);
 }
 
-void onWsEvent(AsyncWebSocket * server, AsyncWebSocketClient * client, AwsEventType type, void * arg, uint8_t *data, size_t len){
- //About 160 messages can be sent before it dies
- //Take data and put it in JSON
-  if(type == WS_EVT_CONNECT){
- 
+void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventType type, void *arg, uint8_t *data, size_t len)
+{
+  //About 160 messages can be sent before it dies
+  //Take data and put it in JSON
+  if (type == WS_EVT_CONNECT)
+  {
+
     Serial.println("Websocket client connection received");
     client->text("Hello from ESP8266 Server");
- 
-  } else if(type == WS_EVT_DISCONNECT){
+  }
+  else if (type == WS_EVT_DISCONNECT)
+  {
     Serial.println("Client disconnected");
- 
-  }else if(type == WS_EVT_DATA){
+  }
+  else if (type == WS_EVT_DATA)
+  {
     //data packet
-    AwsFrameInfo * info = (AwsFrameInfo*)arg;
-    if(info->final && info->index == 0 && info->len == len){
+    AwsFrameInfo *info = (AwsFrameInfo *)arg;
+    if (info->final && info->index == 0 && info->len == len)
+    {
       //the whole message is in a single frame and we got all of it's data
-      os_printf("ws[%s][%u] %s-message[%llu]: ", server->url(), client->id(), (info->opcode == WS_TEXT)?"text":"binary", info->len);
-      if(info->opcode == WS_TEXT){
+      os_printf("ws[%s][%u] %s-message[%llu]: ", server->url(), client->id(), (info->opcode == WS_TEXT) ? "text" : "binary", info->len);
+      if (info->opcode == WS_TEXT)
+      {
         data[len] = 0;
-        os_printf("%s\n", (char*)data);
-      } else {
-        for(size_t i=0; i < info->len; i++){
+        os_printf("%s\n", (char *)data);
+      }
+      else
+      {
+        for (size_t i = 0; i < info->len; i++)
+        {
           os_printf("%02x ", data[i]);
         }
         os_printf("\n");
       }
-      if(info->opcode == WS_TEXT)
-        client->text("I got your text message");
+      if (info->opcode == WS_TEXT)
+        client->text("I got your text message"); //needs to have some kind fo check /timer that if you don't get a command from (ping pong) to auto turn off
       else
         client->binary("I got your binary message");
-    } else {
+    }
+    else
+    {
       //message is comprised of multiple frames or the frame is split into multiple packets
-      if(info->index == 0){
-        if(info->num == 0)
-          os_printf("ws[%s][%u] %s-message start\n", server->url(), client->id(), (info->message_opcode == WS_TEXT)?"text":"binary");
+      if (info->index == 0)
+      {
+        if (info->num == 0)
+          os_printf("ws[%s][%u] %s-message start\n", server->url(), client->id(), (info->message_opcode == WS_TEXT) ? "text" : "binary");
         os_printf("ws[%s][%u] frame[%u] start[%llu]\n", server->url(), client->id(), info->num, info->len);
       }
 
-      os_printf("ws[%s][%u] frame[%u] %s[%llu - %llu]: ", server->url(), client->id(), info->num, (info->message_opcode == WS_TEXT)?"text":"binary", info->index, info->index + len);
-      if(info->message_opcode == WS_TEXT){
+      os_printf("ws[%s][%u] frame[%u] %s[%llu - %llu]: ", server->url(), client->id(), info->num, (info->message_opcode == WS_TEXT) ? "text" : "binary", info->index, info->index + len);
+      if (info->message_opcode == WS_TEXT)
+      {
         data[len] = 0;
-        os_printf("%s\n", (char*)data);
-      } else {
-        for(size_t i=0; i < len; i++){
+        os_printf("%s\n", (char *)data);
+      }
+      else
+      {
+        for (size_t i = 0; i < len; i++)
+        {
           os_printf("%02x ", data[i]);
         }
         os_printf("\n");
       }
 
-      if((info->index + len) == info->len){
+      if ((info->index + len) == info->len)
+      {
         os_printf("ws[%s][%u] frame[%u] end[%llu]\n", server->url(), client->id(), info->num, info->len);
-        if(info->final){
-          os_printf("ws[%s][%u] %s-message end\n", server->url(), client->id(), (info->message_opcode == WS_TEXT)?"text":"binary");
-          if(info->message_opcode == WS_TEXT)
+        if (info->final)
+        {
+          os_printf("ws[%s][%u] %s-message end\n", server->url(), client->id(), (info->message_opcode == WS_TEXT) ? "text" : "binary");
+          if (info->message_opcode == WS_TEXT)
             client->text("I got your text message");
           else
             client->binary("I got your binary message");
@@ -120,8 +139,8 @@ void onWsEvent(AsyncWebSocket * server, AsyncWebSocketClient * client, AwsEventT
 //###Button stuff###
 OneButton btn = OneButton(
     BUTTON, // Input pin for the button
-    false,   // Button is active LOW
-    false    // Enable internal pull-up resistor
+    false,  // Button is active LOW
+    false   // Enable internal pull-up resistor
 );
 unsigned long pressStartTime;
 ICACHE_RAM_ATTR void checkTicks()
@@ -454,10 +473,8 @@ void setUpInductionHeater()
                     lightControl(valueStr.toInt());
                     //function testColor(hex){fetch("http://192.168.1.16/color?intValue="+parseInt(hex, 16).toString(),{method:"POST"})}
                   });
-        httpServer.on("/induti", HTTP_GET, [](AsyncWebServerRequest *request)
-                  {
-                    request->send(200, "text/plain", "true");
-                  });
+    httpServer.on("/induti", HTTP_GET, [](AsyncWebServerRequest *request)
+                  { request->send(200, "text/plain", "true"); });
     httpServer.on("/resetWifi", HTTP_GET, [](AsyncWebServerRequest *request)
                   {
                     digitalWrite(LED, HIGH); // turn the LED off
@@ -470,7 +487,7 @@ void setUpInductionHeater()
                   });
 
     httpServer.onNotFound(notFound);
-    
+
     ws.onEvent(onWsEvent);
     httpServer.addHandler(&ws);
 
@@ -512,7 +529,7 @@ bool handleWaitingConnection()
       if (!bootUp)
       {
         setupConfigPortal();
-      //indertiminateState
+        //indertiminateState
       }
       else
       {
@@ -610,28 +627,25 @@ void loop()
 {
   btn.tick();
   delay(500);
-  Serial.print("Contact read: ");
-  Serial.println(digitalRead(CONTACT));
 
   int analogValue = analogRead(TEMP_SENSOR);
-//   // Serial.print("Raw Value: ");
-//   // Serial.println(analogValue);
-float millivolts = (analogValue/1024.0) * 3300; //3300 is the voltage provided by NodeMCU
-// // Serial.print("Mv:");
-// // Serial.println(millivolts);
-float celsius = (millivolts - 50)/10;
-// // Serial.print("in DegreeC=   ");
-// // Serial.println(celsius);
+  //   // Serial.print("Raw Value: ");
+  //   // Serial.println(analogValue);
+  float millivolts = (analogValue / 1024.0) * 3300; //3300 is the voltage provided by NodeMCU
+  // // Serial.print("Mv:");
+  // // Serial.println(millivolts);
+  float celsius = (millivolts - 50) / 10;
+  // // Serial.print("in DegreeC=   ");
+  // // Serial.println(celsius);
 
-float fahrenheit = ((celsius * 9)/5 + 32);
-Serial.print(" in Farenheit=   ");
-Serial.println(fahrenheit);
+  float fahrenheit = ((celsius * 9) / 5 + 32);
 
-//Safety Turn off..
-if(fahrenheit > 225){ //Some kind of vertical rate climb?
-  digitalWrite(IH, 0);
-  //Mayvbe just force restart all together?
-}
+  //Safety Turn off..
+  if (fahrenheit > 250)
+  { //Some kind of vertical rate climb?
+    digitalWrite(IH, 0);
+    //Mayvbe just force restart all together?
+  }
 
   //if it's config mode
   if (configMode)
@@ -645,15 +659,16 @@ if(fahrenheit > 225){ //Some kind of vertical rate climb?
   if (!setUpControl && !configMode && !waitingWifi)
   {
     setUpInductionHeater();
-
   }
 
-  if(setUpControl){// Everything is setup - Wifi is enabled
+  if (setUpControl)
+  { // Everything is setup - Wifi is enabled
     //Send State
     doc["TEMP"] = fahrenheit;
     doc["CONTACT"] = digitalRead(CONTACT);
-    
+    state = "";
     serializeJson(doc, state);
+    Serial.println(state);
     ws.textAll(state);
   }
 
