@@ -7,7 +7,7 @@
 #include <Schedule.h>
 #include <WiFiUdp.h>
 #include <ArduinoOTA.h>
-
+#include <ESP8266mDNS.h>
 
 #include "html.h"
 
@@ -36,15 +36,22 @@ int BLUE_LED = 0;  //Will fail if touches ground somehow @ boot - D3
 int CONTACT = 14;  //D5
 int TEMP_SENSOR = A0;
 bool errorState = false;
-
-
-//LIGHT CONTROL: TODO move into seperate 
+int IHValue = 0;
+int LEDValue = 0;
+//LIGHT CONTROL: TODO move into seperate
 //Hex Value & brightness
 void lightControl(int hex)
 {
-  analogWrite(RED_LED, (hex >> 16));
-  analogWrite(GREEN_LED, ((hex >> 8) & 0xFF));
-  analogWrite(BLUE_LED, (hex & 0xFF));
+  analogWrite(RED_LED, (hex >> 16) * 4);
+  analogWrite(GREEN_LED, ((hex >> 8) & 0xFF) * 4);
+  analogWrite(BLUE_LED, (hex & 0xFF) * 4);
+  LEDValue = hex;
+}
+
+void IHControl(int val)
+{
+  analogWrite(IH, val);
+  IHValue = val;
 }
 
 void blinkLight(int hex)
@@ -64,7 +71,7 @@ void errorBlink()
 }
 void indeterminateBlink()
 {
-  blinkLight(0xDB4402);
+  blinkLight(0xFF1002);
 }
 void successBlink()
 {
@@ -97,7 +104,7 @@ void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventTyp
   {
 
     Serial.println("Websocket client connection received");
-    client->text("Hello from ESP8266 Server");
+    // client->text("Hello from Induti"); //Don't really need a hello message
   }
   else if (type == WS_EVT_DISCONNECT)
   {
@@ -125,7 +132,40 @@ void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventTyp
         os_printf("\n");
       }
       if (info->opcode == WS_TEXT)
-        client->text("I got your text message"); //needs to have some kind fo check /timer that if you don't get a command from (ping pong) to auto turn off
+      {
+        StaticJsonDocument<48> doc;
+
+        DeserializationError error = deserializeJson(doc, (char *)data, len);
+
+        if (error)
+        {
+          client->text("{\"status\": false}");
+        }
+        else
+        {
+          const char *TYPE = doc["TYPE"];
+
+          if (strcmp(TYPE, "IL") == 0)
+          {
+            LEDValue = doc["LED"];
+            IHValue = doc["IH"];
+            IHControl(IHValue);
+            lightControl(LEDValue);
+          }
+          else if (strcmp(TYPE, "I") == 0)
+          {
+            IHValue = doc["IH"];
+            IHControl(IHValue);
+          }
+          else
+          {
+            LEDValue = doc["LED"];
+            lightControl(LEDValue);
+          }
+
+          client->text("{\"status\": true}"); //needs to have some kind fo check /timer that if you don't get a command from (ping pong) to auto turn off
+        }
+      }
       else
         client->binary("I got your binary message");
     }
@@ -178,7 +218,7 @@ OneButton btn = OneButton(
     false   // Enable internal pull-up resistor
 );
 unsigned long pressStartTime;
-ICACHE_RAM_ATTR void checkTicks()
+IRAM_ATTR void checkTicks()
 {
   // include all buttons here to be checked
   btn.tick(); // just call tick() to check the state.
@@ -190,19 +230,22 @@ void singleClick()
   Serial.println("singleClick() detected.");
   //for fun easy heating....
   lightControl(0xFF00FF);
-  digitalWrite(IH, 255);
+  IHControl(255);
   delay(2500);
-  digitalWrite(IH, 510);
+  IHControl(510);
   delay(2500);
-  digitalWrite(IH, 765);
+  IHControl(765);
   delay(2500);
-  digitalWrite(IH, 1023);
+  IHControl(1023);
   delay(2500);
   lightControl(0x00FF00);
-  digitalWrite(IH, LOW);
+  IHControl(0);
   delay(3000);
   schedule_function(successBlink);
-
+  //bc its the only way
+  WiFi.disconnect();
+  ESP.reset();
+  ESP.restart();
   // lightControl(0xFF0000);
 } // singleClick
 
@@ -210,22 +253,27 @@ void singleClick()
 void doubleClick()
 {
   Serial.println("doubleClick() detected.");
+  successBlink();
   WiFi.mode(WIFI_AP_STA);
   delay(100);
   //setUpVariables();
   WiFi.softAPConfig(apIP, apIP, netMsk);
   WiFi.softAP("Induti");
   delay(100);
+
 } // doubleClick
 
 // this function will be called when the button was pressed multiple times in a short timeframe.
 void multiClick()
 {
+  lightControl(0xFF0000);
+  delay(500);
   Serial.print("multiClick(");
   Serial.print(btn.getNumberClicks());
   Serial.println(") detected.");
   if (btn.getNumberClicks() == 3)
   {
+    lightControl(0xFF0000);
     WiFi.disconnect(true);
     WiFi.persistent(false);
     WiFi.setAutoReconnect(false);
@@ -238,7 +286,7 @@ void pressStart()
 {
   Serial.println("pressStart()");
   pressStartTime = millis() - 1000; // as set in setPressTicks()
-  analogWrite(IH, 765);             // turn the IH on
+  IHControl(765);                   // turn the IH on
   errorState = true;
 } // pressStart()
 
@@ -248,7 +296,7 @@ void pressStop()
   Serial.print("pressStop(");
   Serial.print(millis() - pressStartTime);
   Serial.println(") detected.");
-  analogWrite(IH, LOW); // turn the IH off
+  IHControl(0); // turn the IH off
   errorState = false;
 
 } // pressStop()
@@ -313,8 +361,6 @@ String WiFi_psk(bool persistent)
   return String(reinterpret_cast<char *>(tmp));
 }
 
-
-
 bool connectWifi(String ssid, String pass)
 {
 
@@ -371,10 +417,6 @@ bool connectWifi(String ssid, String pass)
   return true;
 }
 
-
-
-
-
 //## Access Point Server ##
 void handleNotFound(AsyncWebServerRequest *request)
 {
@@ -414,7 +456,6 @@ void setupWebServer()
   httpServer.begin();
   Serial.println("AP Server Begun.");
 }
-
 
 void setupConfigPortal()
 {
@@ -473,6 +514,15 @@ void setupConfigPortal()
   setupWebServer();
 }
 
+String ip2Str(IPAddress ip)
+{
+  String s = "";
+  for (int i = 0; i < 4; i++)
+  {
+    s += i ? "." + String(ip[i]) : String(ip[i]);
+  }
+  return s;
+}
 
 bool setUpControl = false;
 PGM_P control_html = control_html_str;
@@ -496,7 +546,7 @@ void setUpInductionHeater()
     httpServer.on("/on", HTTP_GET, [](AsyncWebServerRequest *request)
                   {
                     digitalWrite(LED, LOW); // turn the LED on
-                    analogWrite(IH, 512);   // turn the IH on
+                    IHControl(225);         // turn the IH on
                     Serial.println("IH ON");
                     lightControl(0x00FF00);
                     request->send(200, "text/plain", "Turning On the IH");
@@ -504,7 +554,7 @@ void setUpInductionHeater()
     httpServer.on("/off", HTTP_GET, [](AsyncWebServerRequest *request)
                   {
                     digitalWrite(LED, HIGH); // turn the LED off
-                    digitalWrite(IH, LOW);   // turn the IH off
+                    IHControl(0);            // turn the IH off
                     lightControl(0xFF0000);
                     Serial.println("IH OFF");
                     request->send(200, "text/plain", "Turning Off the IH");
@@ -519,15 +569,30 @@ void setUpInductionHeater()
                   });
     httpServer.on("/induti", HTTP_GET, [](AsyncWebServerRequest *request)
                   { request->send(200, "text/plain", "true"); });
+    httpServer.on("/restart", HTTP_GET, [](AsyncWebServerRequest *request)
+                  {
+                    digitalWrite(LED, HIGH); // turn the LED off
+                    IHControl(0);            // turn the IH off
+                    Serial.println("Restart");
+                    request->send(200, "text/plain", "Resetting Wifi");
+                    delay(500);
+                    ESP.restart();
+                  });
     httpServer.on("/resetWifi", HTTP_GET, [](AsyncWebServerRequest *request)
                   {
                     digitalWrite(LED, HIGH); // turn the LED off
-                    digitalWrite(IH, LOW);   // turn the IH off
+                    IHControl(0);            // turn the IH off
                     Serial.println("Reset Wifi");
                     request->send(200, "text/plain", "Resetting Wifi");
                     delay(500);
                     WiFi.disconnect();
                     ESP.restart();
+                  });
+    httpServer.on("/ipAddress", HTTP_GET, [](AsyncWebServerRequest *request)
+                  {
+                    String ipAddress = ip2Str(WiFi.localIP());
+                    request->send(200, "text/plain", ipAddress);
+                    delay(500);
                   });
 
     httpServer.onNotFound(notFound);
@@ -537,39 +602,52 @@ void setUpInductionHeater()
 
     httpServer.begin();
 
-    ArduinoOTA.onStart([]() {
-    String type;
-    if (ArduinoOTA.getCommand() == U_FLASH) {
-      type = "sketch";
-    } else { // U_FS
-      type = "filesystem";
-    }
+    ArduinoOTA.onStart([]()
+                       {
+                         String type;
+                         if (ArduinoOTA.getCommand() == U_FLASH)
+                         {
+                           type = "sketch";
+                         }
+                         else
+                         { // U_FS
+                           type = "filesystem";
+                         }
 
-    // NOTE: if updating FS this would be the place to unmount FS using FS.end()
-    Serial.println("Start updating " + type);
-  });
-  ArduinoOTA.onEnd([]() {
-    Serial.println("\nEnd");
-  });
-  ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
-    Serial.printf("Progress: %u%%\r", (progress / (total / 100)));
-  });
-  ArduinoOTA.onError([](ota_error_t error) {
-    Serial.printf("Error[%u]: ", error);
-    if (error == OTA_AUTH_ERROR) {
-      Serial.println("Auth Failed");
-    } else if (error == OTA_BEGIN_ERROR) {
-      Serial.println("Begin Failed");
-    } else if (error == OTA_CONNECT_ERROR) {
-      Serial.println("Connect Failed");
-    } else if (error == OTA_RECEIVE_ERROR) {
-      Serial.println("Receive Failed");
-    } else if (error == OTA_END_ERROR) {
-      Serial.println("End Failed");
-    }
-  });
-  ArduinoOTA.begin();
-
+                         // NOTE: if updating FS this would be the place to unmount FS using FS.end()
+                         Serial.println("Start updating " + type);
+                       });
+    ArduinoOTA.onEnd([]()
+                     { Serial.println("\nEnd"); });
+    ArduinoOTA.onProgress([](unsigned int progress, unsigned int total)
+                          { Serial.printf("Progress: %u%%\r", (progress / (total / 100))); });
+    ArduinoOTA.onError([](ota_error_t error)
+                       {
+                         Serial.printf("Error[%u]: ", error);
+                         if (error == OTA_AUTH_ERROR)
+                         {
+                           Serial.println("Auth Failed");
+                         }
+                         else if (error == OTA_BEGIN_ERROR)
+                         {
+                           Serial.println("Begin Failed");
+                         }
+                         else if (error == OTA_CONNECT_ERROR)
+                         {
+                           Serial.println("Connect Failed");
+                         }
+                         else if (error == OTA_RECEIVE_ERROR)
+                         {
+                           Serial.println("Receive Failed");
+                         }
+                         else if (error == OTA_END_ERROR)
+                         {
+                           Serial.println("End Failed");
+                         }
+                       });
+    ArduinoOTA.begin();
+    MDNS.begin("induti");
+    MDNS.addService("http", "tcp", 80);
     setUpControl = true;
   }
   delay(3000);
@@ -607,6 +685,15 @@ bool handleWaitingConnection()
       if (!bootUp)
       {
         setupConfigPortal();
+        //Induti AP
+        // WiFi.mode(WIFI_AP_STA);
+        // delay(100);
+        // //setUpVariables();
+        // WiFi.softAPConfig(apIP, apIP, netMsk);
+        // WiFi.softAP("Induti");
+        // delay(100);
+        errorState = true;
+
         //indertiminateState
       }
       else
@@ -617,14 +704,13 @@ bool handleWaitingConnection()
         // checkMillis = millis();
         // restartCountdown = true;
         errorState = true;
+        setupConfigPortal();
       }
     }
     delay(1000);
   }
   return true;
 }
-
-
 
 void setup()
 {
@@ -670,12 +756,12 @@ void setup()
     setupConfigPortal();
   }
 }
-DynamicJsonDocument doc(32);
+DynamicJsonDocument doc(64);
 String state = "";
 void loop()
 {
   btn.tick();
-  delay(500);
+  delay(50);
 
   int analogValue = analogRead(TEMP_SENSOR);
   //   // Serial.print("Raw Value: ");
@@ -692,7 +778,7 @@ void loop()
   //Safety Turn off..
   if (fahrenheit > 250)
   { //Some kind of vertical rate climb?
-    digitalWrite(IH, 0);
+    IHControl(0);
     //Mayvbe just force restart all together?
   }
 
@@ -715,11 +801,19 @@ void loop()
     //Send State
     doc["TEMP"] = fahrenheit;
     doc["CONTACT"] = digitalRead(CONTACT);
+    doc["IH"] = IHValue;
+    doc["LED"] = LEDValue;
     state = "";
     serializeJson(doc, state);
     // Serial.println(state);
     ws.textAll(state);
     ArduinoOTA.handle();
+    MDNS.update();
+    if (ws.count() == 0)
+    {
+      IHControl(0);
+      lightControl(0x0);
+    }
   }
 
   if (restartCountdown)

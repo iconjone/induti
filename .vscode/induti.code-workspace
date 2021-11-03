@@ -1,0 +1,21 @@
+{
+	"folders": [
+		{
+			"path": "..",
+			"name": "induti (root)",
+		},
+		{
+			"path": "..\\firmware",
+			"name": "Firmware"
+		},
+		{
+			"path": "..\\app",
+			"name": "App"
+		},
+		{
+			"path": "..\\IndutiWebSocketControl",
+			"name": "NPM module"
+		}
+	],
+	"settings": {}
+}
