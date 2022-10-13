@@ -761,7 +761,7 @@ String state = "";
 void loop()
 {
   btn.tick();
-  delay(50);
+  delay(75);
 
   int analogValue = analogRead(TEMP_SENSOR);
   //   // Serial.print("Raw Value: ");

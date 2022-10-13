@@ -1,4 +1,5 @@
 import WebSocket = require('isomorphic-ws');
+var EventEmitter = require('events')
 //Receive WS url and create WebSocket instance that can send messages and update a variable
 //on close, reconnect to the server
 class IndutiWebSocketControl {
@@ -8,21 +9,29 @@ class IndutiWebSocketControl {
   public isConnected: boolean;
   public timer: any;
   public stateToSet: { IH: any; LED: any; };
+  public event : any;
+  public options: {test: boolean};
 
-  constructor(inputIP?: string) {
+  constructor(inputIP?: string, options?: { test: boolean }) {
     this.ip = inputIP || ""; //Use MDNS to get IP of induti.local if no IP is given
+    this.options = options || { test: false };
     this.ws = null;
     this.isConnected = false;
     this.state = { IH: 0, LED: 0, CONTACT: false, TEMP: 0 };
     this.stateToSet = { IH: null, LED: null };
     this.timer = setTimeout(() => { this.processSend }, 50);
+    this.event = new EventEmitter();
     this.connect();
   }
 
   connect() {
+    //every 5 seconds emit an event with the current state
+
     this.ws = new WebSocket(`ws://${this.ip}/ws`);
+    
     this.ws.onopen = () => {
       this.isConnected = true;
+      this.event.emit('connection', this.isConnected)
     };
     this.ws.onmessage = (event: any) => {
       // console.log(event.data);
@@ -32,21 +41,26 @@ class IndutiWebSocketControl {
         this.state.LED = data.LED;
         this.state.CONTACT = !data.CONTACT;
         this.state.TEMP = data.TEMP;
-        // console.log(this.state);
+       this.event.emit('data', this.state)
       } else if (data.status == false) {
         console.log('Command Failed');
       }
     };
     this.ws.onclose = () => {
+      //Allow closing of websocket if this.close() is called
       this.isConnected = false;
+      this.event.emit('connection', this.isConnected)
       this.connect();
     };
     this.ws.onerror = (error: any) => {
-      console.log(error);
+      // console.log(error);
       this.isConnected = false;
       this.connect();
     }
 
+  }
+  close() {
+    this.ws.close();
   }
   send(message: { type: string; IH?: number; LED?: number }) {
     if (this.ws.readyState === WebSocket.OPEN) {
